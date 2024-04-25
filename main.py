@@ -148,7 +148,7 @@ def set_name(name_request: NameRequest):
     session.close()
 # Роут для получения информации о профиле
 @app.get('/profile')
-def get_profile(jwt_token: str = Depends(verify_token)):
+def get_profile(jwt_token: str):
     session = Session()
     phone_number = verify_token(jwt_token)  # This call retrieves phone number
     user = session.query(User).filter_by(phone_number=phone_number).first()
@@ -166,7 +166,7 @@ def get_courses():
     session.close()
 # Роут для получения списка курсов, на которые зачислен пользователь
 @app.get('/enrolled_courses')
-def get_enrolled_courses(jwt_token: str = Depends(verify_token)):
+def get_enrolled_courses(jwt_token: str):
     session = Session()
     phone_number = verify_token(jwt_token)
     user = session.query(User).filter_by(phone_number=phone_number).first()
@@ -180,7 +180,7 @@ def get_enrolled_courses(jwt_token: str = Depends(verify_token)):
 
 # Роут для получения детальной информации о курсе
 @app.get('/course_details/{course_id}')
-def get_course_details(course_id: int, jwt_token: str = Depends(verify_token)):
+def get_course_details(course_id: int, jwt_token: str):
     session = Session()
     phone_number = verify_token(jwt_token)
     user = session.query(User).filter_by(phone_number=phone_number).first()
