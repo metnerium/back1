@@ -20,8 +20,8 @@ sudo -u postgres psql -c "CREATE DATABASE online_school;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE online_school TO user;"
 
 # Клонирование репозитория и запуск сервера
-git clone https://github.com/your_repo/online_school.git
-cd online_school
+git clone https://github.com/metnerium/back1.git
+cd back1
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload &
 
 # Настройка Nginx

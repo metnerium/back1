@@ -5,6 +5,7 @@ import requests
 import jwt
 from datetime import datetime, timedelta
 from typing import List
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
@@ -12,12 +13,13 @@ from sqlalchemy.orm import sessionmaker, relationship
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.openapi.utils import get_openapi
+from fastapi import Header
 
 # Настройка базы данных
-engine = create_engine('postgresql://user:Fogot173546@localhost/online_school')
+engine = create_engine('postgresql://root:Fogot173546@localhost/online_school')
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
-
+auth_scheme = HTTPBearer()
 # Модели для таблиц
 class User(Base):
     __tablename__ = 'users'
@@ -25,9 +27,8 @@ class User(Base):
     phone_number = Column(String, unique=True)
     username = Column(String)
     jwt_token = Column(String)
-
+    auth_code = Column(String)  # Новое поле для кода авторизации
     enrollments = relationship('Enrollment', back_populates='user')
-
 class Course(Base):
     __tablename__ = 'courses'
     id = Column(Integer, primary_key=True)
@@ -65,65 +66,76 @@ app.add_middleware(
 )
 
 # Секретный ключ для JWT
-SECRET_KEY = 'your_secret_key'
+SECRET_KEY = 'qwerty00'
 
 # Функция для генерации JWT токена
 def generate_token(phone_number):
     payload = {
         'phone_number': phone_number,
-        'exp': datetime.utcnow() + timedelta(days=1)
+        'exp': datetime.utcnow() + timedelta(days=30)
     }
     return jwt.encode(payload, SECRET_KEY, algorithm='HS256')
 
 # Функция для проверки JWT токена
-def verify_token(token):
+def verify_token(token: str = Depends(auth_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
         phone_number = payload['phone_number']
         return phone_number
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         raise HTTPException(status_code=401, detail='Invalid token')
-
 # Функция для получения кода авторизации
 def get_auth_code():
     return ''.join(secrets.choice(string.digits) for _ in range(5))
 
 # Функция для отправки SMS
 def send_sms(phone_number, code):
-    url = f'http://api.smsfeedback.ru/messages/v2/send?login=metnerium&password=Fogot173546&phone={phone_number}&text=Код авторизации в Дитнастии - {code}'
+    url = f'http://api.smsfeedback.ru/messages/v2/send?login=metnerium&password=Fogot173546&phone={phone_number}&text=Код авторизации в Династии - {code}'
     requests.get(url)
 
 # Роут для авторизации
-@app.post('/auth')
-def auth(auth_request: AuthRequest, session: Session = Depends(Session)):
+@app.post('/send_auth_code')
+def send_auth_code(auth_request: AuthRequest):
+    session = Session()
     phone_number = auth_request.phone_number
     user = session.query(User).filter_by(phone_number=phone_number).first()
 
     if not user:
         code = get_auth_code()
         send_sms(phone_number, code)
-        # Здесь нужно получить код от пользователя и сравнить с отправленным кодом
-        # ...
-        new_user = User(phone_number=phone_number, username=f'Ученик {len(session.query(User).all()) + 1}')
+        new_user = User(phone_number=phone_number, username=f'Ученик {len(session.query(User).all()) + 1}', auth_code=code)
         session.add(new_user)
         session.commit()
-        token = generate_token(phone_number)
-        new_user.jwt_token = token
-        session.commit()
-        return {'jwt_token': token}
+        return {'message': 'Code sent to your phone number'}
     else:
         code = get_auth_code()
-        send_sms(phone_number, code)
-        # Здесь нужно получить код от пользователя и сравнить с отправленным кодом
-        # ...
-        token = generate_token(phone_number)
-        user.jwt_token = token
+        user.auth_code = code
         session.commit()
-        return {'jwt_token': token}
+        send_sms(phone_number, code)
+        return {'message': 'Code sent to your phone number'}
+    session.close()
+# Роут для проверки кода авторизации
+@app.post('/verify_code')
+def verify_code(code: str, auth_request: AuthRequest):
+    session = Session()
+    phone_number = auth_request.phone_number
+    user = session.query(User).filter_by(phone_number=phone_number).first()
 
+    if user:
+        if code == user.auth_code:
+            token = generate_token(phone_number)
+            user.jwt_token = token
+            session.commit()
+            return {'jwt_token': token}
+        else:
+            raise HTTPException(status_code=401, detail='Invalid code')
+    else:
+        raise HTTPException(status_code=404, detail='User not found')
+    session.close()
 # Роут для установки имени пользователя
 @app.post('/set_name')
-def set_name(name_request: NameRequest, session: Session = Depends(Session)):
+def set_name(name_request: NameRequest):
+    session = Session()
     jwt_token = name_request.jwt_token
     phone_number = verify_token(jwt_token)
     user = session.query(User).filter_by(phone_number=phone_number).first()
@@ -133,26 +145,29 @@ def set_name(name_request: NameRequest, session: Session = Depends(Session)):
         return {'message': 'Username set successfully'}
     else:
         raise HTTPException(status_code=401, detail='Invalid token')
-
+    session.close()
 # Роут для получения информации о профиле
 @app.get('/profile')
-def get_profile(jwt_token: str = Depends(verify_token), session: Session = Depends(Session)):
-    phone_number = verify_token(jwt_token)
+def get_profile(jwt_token: str = Depends(verify_token)):
+    session = Session()
+    phone_number = verify_token(jwt_token)  # This call retrieves phone number
     user = session.query(User).filter_by(phone_number=phone_number).first()
     if user:
         return {'username': user.username, 'phone_number': user.phone_number}
     else:
         raise HTTPException(status_code=401, detail='Invalid token')
-
+    session.close()
 # Роут для получения списка курсов
 @app.get('/courses')
-def get_courses(session: Session = Depends(Session)):
+def get_courses():
+    session = Session()
     courses = session.query(Course).all()
     return [{'id': course.id, 'name': course.name} for course in courses]
-
+    session.close()
 # Роут для получения списка курсов, на которые зачислен пользователь
 @app.get('/enrolled_courses')
-def get_enrolled_courses(jwt_token: str = Depends(verify_token), session: Session = Depends(Session)):
+def get_enrolled_courses(jwt_token: str = Depends(verify_token)):
+    session = Session()
     phone_number = verify_token(jwt_token)
     user = session.query(User).filter_by(phone_number=phone_number).first()
     if user:
@@ -161,10 +176,12 @@ def get_enrolled_courses(jwt_token: str = Depends(verify_token), session: Sessio
         return [{'id': course.id, 'name': course.name} for course in courses]
     else:
         raise HTTPException(status_code=401, detail='Invalid token')
+    session.close()
 
 # Роут для получения детальной информации о курсе
 @app.get('/course_details/{course_id}')
-def get_course_details(course_id: int, jwt_token: str = Depends(verify_token), session: Session = Depends(Session)):
+def get_course_details(course_id: int, jwt_token: str = Depends(verify_token)):
+    session = Session()
     phone_number = verify_token(jwt_token)
     user = session.query(User).filter_by(phone_number=phone_number).first()
     if user:
@@ -180,6 +197,7 @@ def get_course_details(course_id: int, jwt_token: str = Depends(verify_token), s
             raise HTTPException(status_code=404, detail='Course not found')
     else:
         raise HTTPException(status_code=401, detail='Invalid token')
+    session.close()
 
 # Роут для Swagger UI
 @app.get('/docs', include_in_schema=False)
