@@ -4,7 +4,7 @@ import string
 import requests
 import jwt
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
@@ -54,7 +54,18 @@ class AuthRequest(BaseModel):
 class NameRequest(BaseModel):
     name: str
     jwt_token: str
+class CourseCreationRequest(BaseModel):
+    name: str
+    lessons: List[str]
+    video_links: List[str]
 
+class CourseUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    lessons: Optional[List[str]] = None
+    video_links: Optional[List[str]] = None
+class EnrollmentRequest(BaseModel):
+    jwt_token: str
+    course_id: int
 # Настройка FastAPI
 app = FastAPI()
 app.add_middleware(
@@ -198,7 +209,63 @@ def get_course_details(course_id: int, jwt_token: str):
     else:
         raise HTTPException(status_code=401, detail='Invalid token')
     session.close()
+# Роут для создания курса
+@app.post('/create_courses')
+def create_course(course_request: CourseCreationRequest):
+    session = Session()
+    course = Course(
+        name=course_request.name,
+        lessons=','.join(course_request.lessons),
+        video_links=','.join(course_request.video_links)
+    )
+    session.add(course)
+    session.commit()
+    session.refresh(course)
+    session.close()
+    return {'id': course.id}
 
+# Роут для редактирования курса
+@app.put('/edit_courses/{course_id}')
+def update_course(course_id: int, course_request: CourseUpdateRequest):
+    session = Session()
+    course = session.query(Course).filter_by(id=course_id).first()
+    if course:
+        if course_request.name:
+            course.name = course_request.name
+        if course_request.lessons:
+            course.lessons = ','.join(course_request.lessons)
+        if course_request.video_links:
+            course.video_links = ','.join(course_request.video_links)
+        session.commit()
+        session.close()
+        return {'message': 'Course updated successfully'}
+    else:
+        session.close()
+        raise HTTPException(status_code=404, detail='Course not found')
+# Роут для записи на курс
+@app.post('/enroll')
+def enroll_course(enrollment_request: EnrollmentRequest, jwt_token: str = Depends(auth_scheme)):
+    session = Session()
+    jwt_token = enrollment_request.jwt_token
+    phone_number = verify_token(jwt_token)
+    user = session.query(User).filter_by(phone_number=phone_number).first()
+    course = session.query(Course).filter_by(id=enrollment_request.course_id).first()
+
+    if user and course:
+        # Проверяем, не записан ли пользователь уже на этот курс
+        existing_enrollment = session.query(Enrollment).filter_by(user_id=user.id, course_id=course.id).first()
+        if existing_enrollment:
+            session.close()
+            raise HTTPException(status_code=400, detail='User already enrolled in this course')
+
+        enrollment = Enrollment(user_id=user.id, course_id=course.id)
+        session.add(enrollment)
+        session.commit()
+        session.close()
+        return {'message': 'User enrolled in course successfully'}
+    else:
+        session.close()
+        raise HTTPException(status_code=404, detail='User or course not found')
 # Роут для Swagger UI
 @app.get('/docs', include_in_schema=False)
 async def get_documentation(request: Request):
