@@ -16,7 +16,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi import Header
 
 # Настройка базы данных
-engine = create_engine('postgresql://root:Fogot173546@localhost/online_school')
+engine = create_engine('postgresql://user:pass@localhost/db')
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
 auth_scheme = HTTPBearer()
@@ -101,7 +101,7 @@ def get_auth_code():
 
 # Функция для отправки SMS
 def send_sms(phone_number, code):
-    url = f'http://api.smsfeedback.ru/messages/v2/send?login=metnerium&password=Fogot173546&phone={phone_number}&text=Код авторизации в Династии - {code}'
+    url = f'http://api.smsfeedback.ru/messages/v2/send?login=metnerium&password=pass&phone={phone_number}&text=Код авторизации в Династии - {code}'
     requests.get(url)
 
 # Роут для авторизации
